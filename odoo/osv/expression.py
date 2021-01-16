@@ -143,7 +143,7 @@ DOMAIN_OPERATORS = (NOT_OPERATOR, OR_OPERATOR, AND_OPERATOR)
 # operators are also used. In this case its right operand has the form (subselect, params).
 TERM_OPERATORS = ('=', '!=', '<=', '<', '>', '>=', '=?', '=like', '=ilike',
                   'like', 'not like', 'ilike', 'not ilike', 'in', 'not in',
-                  'child_of', 'parent_of')
+                  'child_of', 'parent_of', '@@')
 
 # A subset of the above operators, with a 'negative' semantic. When the
 # expressions 'in NEGATIVE_TERM_OPERATORS' or 'not in NEGATIVE_TERM_OPERATORS' are used in the code
@@ -916,7 +916,7 @@ class expression(object):
                 leaf.leaf = (path[0], 'in', right_ids)
                 push(leaf)
 
-            elif not field.store:
+            elif not field.store and 'data_xml_xpath' not in dir(field):
                 # Non-stored field should provide an implementation of search.
                 if not field.search:
                     # field does not support search!
@@ -1259,6 +1259,15 @@ class expression(object):
                 query, params = self.__leaf_to_sql(
                     create_substitution_leaf(eleaf, (left, '=', right), model))
 
+        elif operator == '@@':
+            query = "to_tsvector('spanish', %s.%s) @@ to_tsquery('spanish', %%s)" % (table_alias, _quote(left))
+            params = [pycompat.to_text(right)]
+
+        elif left in model and 'data_xml_xpath' in dir(model._fields[left]):
+            sql_operator = {'=like': 'like', '=ilike': 'ilike'}.get(operator, operator)
+            query = "xpath(%%s, %s.data_xml)::text[] %s %%s::text[]" % (table_alias, sql_operator)
+            params = [model._fields[left].data_xml_xpath+'/text()', '{'+pycompat.to_text(right)+'}']
+ 
         else:
             need_wildcard = operator in ('like', 'ilike', 'not like', 'not ilike')
             sql_operator = {'=like': 'like', '=ilike': 'ilike'}.get(operator, operator)
